@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- SEO & Metadata -->
+    <title>O Verdadeiro Tamanho dos Países - Visualização Interativa</title>
+    <meta name="description" content="Descubra o tamanho real dos países. Uma ferramenta interativa que corrige a distorção do mapa Mercator e inclui um quiz geográfico.">
+    <meta name="keywords" content="mapa interativo, projeção mercator, tamanho real países, geografia, quiz geografia, the true size, comparação de mapas">
+    <meta name="author" content="Full Stack GIS Engineer">
+    
+    <!-- Open Graph / Social -->
+    <meta property="og:title" content="Real Earth Scale - Compare Countries Correctly">
+    <meta property="og:description" content="Interactive map tool to compare real country sizes without Mercator distortion.">
+    <meta property="og:type" content="website">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --accent-hover: #2980b9;
+            --danger: #e74c3c;
+            --success: #2ecc71;
+            --bg-glass: rgba(255, 255, 255, 0.95);
+            --shadow: 0 8px 32px rgba(0,0,0,0.15);
+            --radius: 12px;
+            --font: 'Inter', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC', 'Noto Sans Arabic', sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: var(--font);
+            overflow: hidden;
+            background: #1a1a1a;
+            /* Prevent pull-to-refresh on mobile */
+            overscroll-behavior: none;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+            background: #cdcfcd; 
+        }
+
+        /* --- UI Overlay --- */
+        .ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            width: 360px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: calc(100vh - 40px);
+            transition: all 0.3s ease;
+            pointer-events: none; /* Let clicks pass through empty spaces */
+        }
+
+        /* Make children interactive */
+        .ui-panel > * {
+            pointer-events: auto;
+        }
+
+        /* RTL Support Logic */
+        html[dir="rtl"] .ui-panel {
+            left: auto;
+            right: 20px;
+        }
+        
+        html[dir="rtl"] .country-tag {
+            border-left: none;
+            border-right: 5px solid;
+            padding-left: 10px;
+            padding-right: 14px;
+        }
+
+        .card {
+            background: var(--bg-glass);
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            /* Ensure scrolling works inside card */
+            max-height: 100%;
+            overflow-y: auto;
+        }
+
+        .header {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 1.1rem;
+            margin: 0;
+            color: var(--primary);
+            font-weight: 800;
+            line-height: 1.2;
+        }
+
+        /* Language Select */
+        .lang-select {
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            background: white;
+            font-size: 0.8rem;
+            color: var(--primary);
+            cursor: pointer;
+            outline: none;
+            max-width: 80px;
+        }
+
+        /* Tabs */
+        .nav-tabs {
+            display: flex;
+            background: #f1f2f6;
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 5px;
+            flex-shrink: 0;
+        }
+
+        .nav-tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            color: #7f8c8d;
+            transition: all 0.2s;
+        }
+
+        .nav-tab.active {
+            background: white;
+            color: var(--primary);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        /* Search */
+        .search-wrapper {
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 15px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: var(--radius);
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s;
+            font-family: var(--font);
+            background: white;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        .suggestions {
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            right: 0;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            max-height: 250px;
+            overflow-y: auto;
+            display: none;
+            z-index: 1001;
+        }
+
+        .suggestion-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .suggestion-item:hover { background-color: #f8f9fa; color: var(--accent); }
+
+        /* Active List */
+        #active-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-height: 50px;
+            flex-grow: 1; /* Allow list to grow */
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .country-tag {
+            background: white;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border-left: 5px solid; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            animation: slideIn 0.3s ease;
+        }
+
+        .tag-content strong { display: block; font-size: 0.95rem; margin-bottom: 4px; color: var(--primary); }
+        .tag-stats { font-size: 0.75rem; color: #666; display: flex; flex-direction: column; gap: 2px;}
+
+        .tag-actions {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .icon-btn {
+            background: #f8f9fa;
+            border: 1px solid #eee;
+            color: #666;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+        .icon-btn:hover { background: #e9ecef; color: var(--primary); }
+        .icon-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .remove-btn:hover { background: #ffebee; color: var(--danger); border-color: #ffcdd2; }
+
+        /* Footer */
+        .footer-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .btn-secondary {
+            background: white;
+            border: 1px solid #eee;
+            padding: 10px;
+            border-radius: 8px;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover { background: #f8f9fa; border-color: #ddd; transform: translateY(-1px); }
+        
+        .btn-clear {
+            width: 100%;
+            background: #fff5f5;
+            color: var(--danger);
+            border: 1px solid #ffebee;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-top: 5px;
+            flex-shrink: 0;
+        }
+        .btn-clear:hover { background: #ffebee; }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            max-width: 600px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        @keyframes popIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .modal-header { padding: 20px 25px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 25px; line-height: 1.6; color: #444; }
+        .modal-footer { padding: 15px 25px; border-top: 1px solid #eee; text-align: right; }
+        
+        /* Custom Leaflet Controls */
+        .rot-handle {
+            background-color: white;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            display: flex; /* Flex is set here, but visibility controlled by map */
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--accent);
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        .rot-handle:hover {
+            background-color: var(--accent);
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .flag-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            font-size: 24px;
+            text-align: center;
+            pointer-events: none;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .leaflet-interactive {
+            cursor: grab;
+            transition: fill-opacity 0.2s;
+        }
+        .leaflet-interactive:active {
+            cursor: grabbing;
+        }
+
+        /* --- MOBILE & RESPONSIVE OPTIMIZATION --- */
+        
+        /* Portrait Mobile */
+        @media (max-width: 500px) {
+            .ui-panel { width: calc(100% - 40px); top: 10px; left: 20px; }
+            html[dir="rtl"] .ui-panel { right: 20px; left: auto; }
+            
+            h1 { font-size: 1rem; }
+            .card { padding: 15px; gap: 10px; }
+            
+            /* Compact list items */
+            .country-tag { padding: 8px 10px; }
+            .tag-stats { display: none; } /* Hide detailed stats on very small screens to save space? Optional. Let's keep minimal. */
+        }
+
+        /* Landscape Mobile (Height Constraint) */
+        @media (max-height: 600px) {
+            .ui-panel {
+                top: 10px;
+                bottom: 10px;
+                max-height: 95vh;
+            }
+            .card {
+                max-height: 100%; /* Fill panel */
+            }
+            .header { margin-bottom: 5px; }
+            #active-list {
+                flex-grow: 1;
+                min-height: 80px;
+            }
+            .footer-actions { margin-top: 5px; }
+            
+            /* If specifically landscape phone, maybe narrow width */
+            @media (orientation: landscape) {
+                .ui-panel { width: 300px; }
+            }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="ui-panel">
+        <div class="card">
+            <div class="header">
+                <div class="header-top">
+                    <h1 id="app-title">O Verdadeiro Tamanho</h1>
+                    <select id="lang-select" class="lang-select" onchange="changeLanguage(this.value)">
+                        <option value="pt">PT</option>
+                        <option value="en">EN</option>
+                        <option value="es">ES</option>
+                        <option value="fr">FR</option>
+                        <option value="de">DE</option>
+                        <option value="zh">ZH</option>
+                        <option value="ja">JA</option>
+                        <option value="ko">KO</option>
+                        <option value="hi">HI</option>
+                        <option value="id">ID</option>
+                        <option value="ar">AR</option>
+                    </select>
+                </div>
+                
+                <div class="nav-tabs">
+                    <div class="nav-tab active" onclick="switchTab('map')" id="tab-map">Mapa</div>
+                    <div class="nav-tab" onclick="switchTab('game')" id="tab-game">Quiz</div>
+                </div>
+            </div>
+
+            <!-- MAP MODE -->
+            <div id="map-panel" style="display:flex; flex-direction:column; height:100%; overflow:hidden;">
+                <div class="search-wrapper">
+                    <input type="text" id="search-input" class="search-input" placeholder="Carregando..." disabled>
+                    <div class="suggestions" id="suggestions"></div>
+                </div>
+
+                <div id="active-list"></div>
+                
+                <button class="btn-clear" onclick="clearMap()" id="btn-clear">Limpar Mapa</button>
+
+                <div class="footer-actions" style="margin-top:10px;">
+                    <button class="btn-secondary" onclick="openModal('how')">
+                        <span data-i18n="howBtn">Ajuda</span>
+                    </button>
+                    <button class="btn-secondary" onclick="openModal('about')">
+                        <span data-i18n="aboutBtn">Sobre</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- GAME MODE -->
+            <div id="game-panel" style="display:none; flex-direction:column; gap:15px; text-align:center;">
+                <div class="game-score">Score: <span id="score-val">0</span></div>
+                <p class="game-question" id="game-q-text">Qual país é maior?</p>
+                
+                <button class="game-btn" id="opt-a" onclick="guess(0)">Opção A</button>
+                <div class="game-vs">VS</div>
+                <button class="game-btn" id="opt-b" onclick="guess(1)">Opção B</button>
+
+                <p id="game-feedback" style="font-size:0.9rem; min-height:1.2em;"></p>
+                <button class="btn-secondary" onclick="initGame()" id="btn-restart" style="display:none;">Jogar Novamente</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal-overlay" id="modal-how">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 data-i18n="howTitle">Como Usar</h2>
+                <button onclick="closeModals()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p data-i18n="howP1">Mapas planos distorcem tamanhos perto dos polos.</p>
+                <ul>
+                    <li>👆 <strong>Mover:</strong> Clique e arraste o país.</li>
+                    <li>🖱️ <strong>Girar (Mouse):</strong> Segure o <strong>Botão do Meio (Scroll)</strong> e mova o mouse.</li>
+                    <li>🔄 <strong>Girar (Menu):</strong> Clique no botão de rotação na lista para mostrar a alça.</li>
+                    <li>❌ <strong>Remover:</strong> Clique com o botão direito no país.</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModals()">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-about">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 data-i18n="aboutBtn">Sobre</h2>
+                <button onclick="closeModals()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Calculadora de projeção de Mercator em tempo real.</p>
+                <p>Dados: Natural Earth 1:110m.</p>
+                <p>Criado por Full Stack GIS Engineer.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // --- CONFIG & DATA ---
+        const GEOJSON_URL = 'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson';
+        const R = 6371000;
+
+        const I18N = {
+            pt: { title: "O Verdadeiro Tamanho", search: "Buscar país...", clear: "Limpar Mapa", howBtn: "Como Usar", aboutBtn: "Sobre", howTitle: "Controles", howP1: "A projeção de Mercator distorce a realidade.", pop: "População", area: "Área", tabMap: "Mapa", tabGame: "Quiz", gameQ: "Qual país é maior?", loading: "Carregando..." },
+            en: { title: "Real Earth Scale", search: "Search country...", clear: "Clear Map", howBtn: "How to Use", aboutBtn: "About", howTitle: "Controls", howP1: "Mercator projection distorts reality.", pop: "Population", area: "Area", tabMap: "Map", tabGame: "Quiz", gameQ: "Which is larger?", loading: "Loading..." },
+            es: { title: "Escala Real", search: "Buscar...", clear: "Limpiar", howBtn: "Uso", aboutBtn: "Acerca", howTitle: "Controles", howP1: "Mercator distorsiona la realidad.", pop: "Población", area: "Área", tabMap: "Mapa", tabGame: "Juego", gameQ: "¿Cuál es mayor?", loading: "Cargando..." },
+            fr: { title: "L'Échelle Réelle", search: "Rechercher...", clear: "Effacer", howBtn: "Aide", aboutBtn: "À propos", howTitle: "Contrôles", howP1: "Mercator déforme la réalité.", pop: "Population", area: "Surface", tabMap: "Carte", tabGame: "Quiz", gameQ: "Lequel est plus grand ?", loading: "Chargement..." },
+            de: { title: "Wahre Größe", search: "Suchen...", clear: "Leeren", howBtn: "Hilfe", aboutBtn: "Über", howTitle: "Steuerung", howP1: "Mercator verzerrt die Realität.", pop: "Einwohner", area: "Fläche", tabMap: "Karte", tabGame: "Quiz", gameQ: "Welches ist größer?", loading: "Laden..." },
+            zh: { title: "真实比例", search: "搜索...", clear: "清除", howBtn: "帮助", aboutBtn: "关于", howTitle: "控制", howP1: "墨卡托投影扭曲了现实。", pop: "人口", area: "面积", tabMap: "地图", tabGame: "测验", gameQ: "哪个更大？", loading: "加载中..." },
+            ja: { title: "本当の大きさ", search: "検索...", clear: "クリア", howBtn: "使い方", aboutBtn: "約", howTitle: "操作", howP1: "メルカトル図法は歪みます。", pop: "人口", area: "面積", tabMap: "地図", tabGame: "クイズ", gameQ: "どちらが大きい？", loading: "読み込み中..." },
+            ko: { title: "실제 크기", search: "검색...", clear: "지우기", howBtn: "사용법", aboutBtn: "정보", howTitle: "조작", howP1: "메르카토르 도법은 왜곡됩니다.", pop: "인구", area: "면적", tabMap: "지도", tabGame: "퀴즈", gameQ: "어느 것이 더 큰가요?", loading: "로딩 중..." },
+            hi: { title: "वास्तविक आकार", search: "खोजें...", clear: "साफ़ करें", howBtn: "मदद", aboutBtn: "के बारे में", howTitle: "नियंत्रण", howP1: "मानक नक्शे आकार बिगाड़ते हैं।", pop: "आबादी", area: "क्षेत्रफल", tabMap: "नक्शा", tabGame: "क्विज़", gameQ: "कौन बड़ा है?", loading: "लोड हो रहा है..." },
+            id: { title: "Ukuran Asli", search: "Cari...", clear: "Hapus", howBtn: "Bantuan", aboutBtn: "Tentang", howTitle: "Kontrol", howP1: "Peta mendistorsi realitas.", pop: "Populasi", area: "Area", tabMap: "Peta", tabGame: "Kuis", gameQ: "Mana lebih besar?", loading: "Memuat..." },
+            ar: { title: "الحجم الحقيقي", search: "بحث...", clear: "مسح", howBtn: "مساعدة", aboutBtn: "حول", howTitle: "التحكم", howP1: "الخرائط تشوه الواقع.", pop: "السكان", area: "المساحة", tabMap: "خريطة", tabGame: "لعبة", gameQ: "أيهما أكبر؟", loading: "جار التحميل..." }
+        };
+
+        const ALIASES = {
+            "United States of America": ["Estados Unidos", "USA", "EUA", "US"],
+            "Brazil": ["Brasil"],
+            "Russia": ["Rússia", "Russland"],
+            "China": ["中国"],
+            "India": ["Índia"],
+            "Japan": ["Japão", "Nihon"],
+            "Germany": ["Alemanha", "Deutschland"],
+            "France": ["França"],
+            "United Kingdom": ["Reino Unido", "UK", "Inglaterra"],
+            "Saudi Arabia": ["Arabia Saudita"]
+        };
+
+        // --- GLOBAL STATE ---
+        let map, globalGeoJSON = [], activeLayers = [];
+        let currentLang = 'pt';
+        let draggingLayer = null;
+        let dragOffset = null;
+        
+        // Rotation State
+        let rotationTarget = null;
+        let rotationStartBearing = 0;
+        let rotationStartValue = 0;
+        
+        let gameScore = 0;
+        let currentPair = [];
+
+        // --- HELPERS ---
+        const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() : "";
+
+        function getFlagEmoji(countryCode) {
+            if (!countryCode) return '🏳️';
+            const codePoints = countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt());
+            return String.fromCodePoint(...codePoints);
+        }
+
+        function formatNumber(num) {
+            return new Intl.NumberFormat(currentLang === 'pt' ? 'pt-BR' : 'en-US', { notation: "compact", maximumFractionDigits: 1 }).format(num);
+        }
+
+        // --- GEODESIC MATH ---
+        function toRad(d) { return d * Math.PI / 180; }
+        function toDeg(r) { return r * 180 / Math.PI; }
+
+        function getDistBearing(lat1, lng1, lat2, lng2) {
+            const φ1 = toRad(lat1), λ1 = toRad(lng1);
+            const φ2 = toRad(lat2), λ2 = toRad(lng2);
+            const Δφ = φ2 - φ1, Δλ = λ2 - λ1;
+            const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const y = Math.sin(Δλ) * Math.cos(φ2);
+            const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+            return { dist: R * c, bearing: toDeg(Math.atan2(y, x)) };
+        }
+
+        function getDestPoint(lat, lng, dist, bearing) {
+            const φ1 = toRad(lat), λ1 = toRad(lng);
+            const δ = dist / R;
+            const b = toRad(bearing);
+            const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(b));
+            const λ2 = λ1 + Math.atan2(Math.sin(b)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+            return [toDeg(φ2), toDeg(λ2)];
+        }
+
+        function calculateArea(rings) {
+            let area = 0;
+            if (rings.length > 0) {
+                const points = rings[0];
+                if (points.length > 2) {
+                    for (let i = 0; i < points.length; i++) {
+                        let p1 = points[i];
+                        let p2 = points[(i + 1) % points.length];
+                        area += (toRad(p2[1]) - toRad(p1[1])) * (2 + Math.sin(toRad(p1[0])) + Math.sin(toRad(p2[0])));
+                    }
+                    area = area * R * R / 2.0;
+                }
+            }
+            return Math.abs(area);
+        }
+
+        // --- MAIN APP ---
+
+        function init() {
+            const tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd', maxZoom: 18, minZoom: 2, noWrap: false, attribution: '© OSM'
+            });
+            
+            map = L.map('map', { center: [20, 0], zoom: 2, layers: [tiles], zoomControl: false, worldCopyJump: true });
+            
+            // Add zoom control bottom right for better mobile ergonomics if right-handed, 
+            // but top-right is standard. Stick to standard to avoid overlay issues.
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            fetch(GEOJSON_URL).then(r => r.json()).then(data => {
+                globalGeoJSON = data.features;
+                const input = document.getElementById('search-input');
+                input.disabled = false;
+                input.placeholder = I18N[currentLang] ? I18N[currentLang].search : I18N.en.search;
+                updateUI();
+                addCountry("Brazil"); 
+            }).catch(e => { console.error(e); });
+
+            // Global Map Events
+            map.on('mousemove', onMapMouseMove);
+            map.on('mouseup', onMapMouseUp);
+            
+            setupSearch();
+        }
+
+        function setupSearch() {
+            const input = document.getElementById('search-input');
+            const suggestions = document.getElementById('suggestions');
+            
+            input.addEventListener('input', (e) => {
+                const val = normalize(e.target.value);
+                suggestions.innerHTML = '';
+                if(val.length < 2) { suggestions.style.display = 'none'; return; }
+                
+                const hits = globalGeoJSON.filter(f => {
+                    const name = f.properties.name;
+                    if (normalize(name).includes(val)) return true;
+                    const aliases = ALIASES[name] || [];
+                    return aliases.some(a => normalize(a).includes(val));
+                }).sort((a,b) => b.properties.pop_est - a.properties.pop_est).slice(0, 10);
+
+                if(hits.length) {
+                    suggestions.style.display = 'block';
+                    hits.forEach(h => {
+                        const d = document.createElement('div');
+                        d.className = 'suggestion-item';
+                        const flag = getFlagEmoji(h.properties.iso_a2);
+                        d.innerHTML = `<span>${flag} ${h.properties.name}</span>`;
+                        d.onclick = () => {
+                            addCountry(h.properties.name);
+                            input.value = '';
+                            suggestions.style.display = 'none';
+                        };
+                        suggestions.appendChild(d);
+                    });
+                } else {
+                    suggestions.style.display = 'none';
+                }
+            });
+            document.addEventListener('click', e => {
+                if(!input.contains(e.target) && !suggestions.contains(e.target)) suggestions.style.display='none';
+            });
+        }
+
+        // --- LAYER LOGIC ---
+
+        function addCountry(name) {
+            const f = globalGeoJSON.find(g => g.properties.name === name);
+            if(!f || activeLayers.find(l => l.name === name)) return;
+
+            const color = `hsl(${Math.random()*360}, 70%, 50%)`;
+            const flag = getFlagEmoji(f.properties.iso_a2);
+            
+            // Geometry
+            let rings = [];
+            const geom = f.geometry;
+            if(geom.type === "Polygon") rings.push(geom.coordinates[0]);
+            else geom.coordinates.forEach(p => rings.push(p[0]));
+            rings = rings.map(r => r.map(c => [c[1], c[0]]));
+
+            const areaSqKm = calculateArea(rings) / 1e6;
+
+            // Center
+            let sumLat=0, sumLng=0, count=0;
+            rings.forEach(r => r.forEach(p => { sumLat+=p[0]; sumLng+=p[1]; count++; }));
+            const cLat = sumLat/count;
+            const cLng = sumLng/count;
+
+            // Offsets
+            const ringsOffsets = rings.map(r => r.map(p => getDistBearing(cLat, cLng, p[0], p[1])));
+
+            // Polygon
+            const poly = L.polygon(rings, { color, fillColor: color, fillOpacity: 0.5, weight: 1, interactive: true }).addTo(map);
+
+            // Rotation Handle (Hidden by default)
+            let maxDist = 0;
+            ringsOffsets.forEach(r => r.forEach(o => maxDist = Math.max(maxDist, o.dist)));
+            const handleDist = maxDist * 1.3; 
+            const handlePos = getDestPoint(cLat, cLng, handleDist, 0); 
+
+            // Initialize but DO NOT add to map yet
+            const rotLine = L.polyline([[cLat, cLng], handlePos], { color: '#444', dashArray: '4, 6', weight: 1.5, opacity: 0.5 });
+            const rotHandle = L.marker(handlePos, { draggable: true, icon: L.divIcon({ className: 'rot-handle', iconSize: [24, 24], html: '↻' }) });
+
+            const flagLabel = L.marker([cLat, cLng], {
+                icon: L.divIcon({ className: 'flag-label', html: flag, iconSize: [30, 30] }),
+                interactive: false
+            }).addTo(map);
+
+            const layerObj = {
+                id: Date.now() + Math.random(),
+                name, iso: f.properties.iso_a2, flag, color,
+                pop: (f.properties.pop_est/1e6).toFixed(1) + "M",
+                area: areaSqKm,
+                center: [cLat, cLng],
+                rotation: 0, 
+                ringsOffsets, handleDist,
+                poly, rotHandle, rotLine, flagLabel,
+                showRotation: false
+            };
+
+            // Events
+            poly.on('mousedown', (e) => startDrag(e, layerObj));
+            poly.on('contextmenu', (e) => { L.DomEvent.preventDefault(e); removeLayer(layerObj.id); });
+
+            rotHandle.on('dragstart', (e) => { rotationTarget = layerObj; map.dragging.disable(); });
+            rotHandle.on('drag', (e) => { updateRotationFromHandle(e.latlng, layerObj); });
+            rotHandle.on('dragend', () => { rotationTarget = null; map.dragging.enable(); });
+
+            activeLayers.push(layerObj);
+            updateList();
+            map.flyTo([cLat, cLng], Math.min(4, map.getZoom()));
+        }
+
+        // --- INTERACTION ---
+
+        function startDrag(e, layer) {
+            // LEFT CLICK (0) -> MOVE
+            if (e.originalEvent.button === 0) {
+                L.DomEvent.stopPropagation(e);
+                map.dragging.disable();
+                draggingLayer = layer;
+                dragOffset = getDistBearing(e.latlng.lat, e.latlng.lng, layer.center[0], layer.center[1]);
+            }
+            // MIDDLE CLICK (1) -> ROTATE (Invisible Handle Mode)
+            else if (e.originalEvent.button === 1) {
+                L.DomEvent.stopPropagation(e);
+                L.DomEvent.preventDefault(e); // Prevent scroll
+                map.dragging.disable();
+                
+                rotationTarget = layer;
+                const res = getDistBearing(layer.center[0], layer.center[1], e.latlng.lat, e.latlng.lng);
+                rotationStartBearing = res.bearing;
+                rotationStartValue = layer.rotation;
+            }
+        }
+
+        function onMapMouseMove(e) {
+            if (draggingLayer) {
+                const newCenter = getDestPoint(e.latlng.lat, e.latlng.lng, dragOffset.dist, dragOffset.bearing);
+                draggingLayer.center = newCenter;
+                redrawLayer(draggingLayer);
+            }
+            else if (rotationTarget) {
+                // Determine if this is a handle drag or a middle-mouse drag
+                // If the rotHandle is NOT dragging (handled by its own event), then it's middle mouse
+                // Actually, rotHandle has its own listener. This global listener handles the middle mouse case.
+                
+                // We check if we have start values set (middle mouse mode)
+                // The handle drag calls 'updateRotationFromHandle' directly.
+                // So this block handles the "invisible" rotation.
+                
+                // Recalc bearing from center to mouse
+                const res = getDistBearing(rotationTarget.center[0], rotationTarget.center[1], e.latlng.lat, e.latlng.lng);
+                
+                // If we are in middle mouse mode (implied by this function being called while rotationTarget is set outside of handle event)
+                // Note: The handle drag event stops propagation usually? No, it fires move events on marker.
+                // Simpler check: If rotHandle._dragging is true, skip this.
+                if (rotationTarget.rotHandle.dragging && rotationTarget.rotHandle.dragging.enabled()) return;
+
+                // Calculate Delta
+                let delta = res.bearing - rotationStartBearing;
+                rotationTarget.rotation = rotationStartValue + delta;
+                redrawLayer(rotationTarget);
+            }
+        }
+
+        function onMapMouseUp() {
+            if (draggingLayer) { draggingLayer = null; map.dragging.enable(); }
+            if (rotationTarget) { rotationTarget = null; map.dragging.enable(); }
+        }
+
+        function updateRotationFromHandle(handleLatLng, layer) {
+            const res = getDistBearing(layer.center[0], layer.center[1], handleLatLng.lat, handleLatLng.lng);
+            layer.rotation = res.bearing;
+            redrawLayer(layer);
+        }
+
+        function redrawLayer(layer) {
+            // Poly
+            const newRings = layer.ringsOffsets.map(r => r.map(o => getDestPoint(layer.center[0], layer.center[1], o.dist, o.bearing + layer.rotation)));
+            layer.poly.setLatLngs(newRings);
+            // Handle
+            const newHandlePos = getDestPoint(layer.center[0], layer.center[1], layer.handleDist, layer.rotation);
+            layer.rotHandle.setLatLng(newHandlePos);
+            layer.rotLine.setLatLngs([layer.center, newHandlePos]);
+            // Label
+            layer.flagLabel.setLatLng(layer.center);
+        }
+
+        function toggleRotate(id) {
+            const l = activeLayers.find(layer => layer.id === id);
+            if (!l) return;
+
+            l.showRotation = !l.showRotation;
+            if (l.showRotation) {
+                l.rotLine.addTo(map);
+                l.rotHandle.addTo(map);
+            } else {
+                map.removeLayer(l.rotLine);
+                map.removeLayer(l.rotHandle);
+            }
+            updateList();
+        }
+
+        function removeLayer(id) {
+            const idx = activeLayers.findIndex(l => l.id === id);
+            if(idx > -1) {
+                const l = activeLayers[idx];
+                map.removeLayer(l.poly);
+                if(map.hasLayer(l.rotHandle)) map.removeLayer(l.rotHandle);
+                if(map.hasLayer(l.rotLine)) map.removeLayer(l.rotLine);
+                map.removeLayer(l.flagLabel);
+                activeLayers.splice(idx, 1);
+                updateList();
+            }
+        }
+
+        function clearMap() {
+            activeLayers.forEach(l => {
+                map.removeLayer(l.poly);
+                if(map.hasLayer(l.rotHandle)) map.removeLayer(l.rotHandle);
+                if(map.hasLayer(l.rotLine)) map.removeLayer(l.rotLine);
+                map.removeLayer(l.flagLabel);
+            });
+            activeLayers = [];
+            updateList();
+        }
+
+        function updateList() {
+            const el = document.getElementById('active-list');
+            el.innerHTML = '';
+            const t = I18N[currentLang] || I18N.en;
+            
+            activeLayers.forEach(l => {
+                const d = document.createElement('div');
+                d.className = 'country-tag';
+                d.style.borderLeftColor = l.color;
+                if (document.documentElement.dir === "rtl") d.style.borderRightColor = l.color;
+
+                const rotClass = l.showRotation ? 'active' : '';
+
+                d.innerHTML = `
+                    <div class="tag-content" style="flex-grow:1;">
+                        <strong>${l.flag} ${l.name}</strong>
+                        <div class="tag-stats">
+                            <span>${t.pop}: <b>${l.pop}</b></span>
+                            <span style="font-size:0.7rem; color:#888;">${t.area}: <b>${formatNumber(l.area)}</b> km²</span>
+                        </div>
+                    </div>
+                    <div class="tag-actions">
+                        <button class="icon-btn ${rotClass}" onclick="toggleRotate(${l.id})" title="Girar">🔄</button>
+                        <button class="icon-btn remove-btn" onclick="removeLayer(${l.id})" title="Remover">&times;</button>
+                    </div>
+                `;
+                el.appendChild(d);
+            });
+        }
+
+        // --- GAME ---
+        function switchTab(tab) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById('tab-'+tab).classList.add('active');
+            if(tab === 'game') {
+                document.getElementById('map-panel').style.display = 'none';
+                document.getElementById('game-panel').style.display = 'flex';
+                if(currentPair.length === 0) initGame();
+            } else {
+                document.getElementById('map-panel').style.display = 'flex';
+                document.getElementById('game-panel').style.display = 'none';
+            }
+        }
+
+        function initGame() {
+            gameScore = 0;
+            document.getElementById('score-val').innerText = 0;
+            document.getElementById('btn-restart').style.display = 'none';
+            nextRound();
+        }
+
+        function nextRound() {
+            document.getElementById('game-feedback').innerText = '';
+            document.querySelectorAll('.game-btn').forEach(b => { b.className = 'game-btn'; b.disabled = false; });
+
+            const pool = globalGeoJSON.filter(f => f.properties.pop_est > 5000000);
+            if(pool.length < 2) return; 
+
+            const c1 = pool[Math.floor(Math.random() * pool.length)];
+            let c2 = pool[Math.floor(Math.random() * pool.length)];
+            while(c1 === c2) c2 = pool[Math.floor(Math.random() * pool.length)];
+
+            currentPair = [c1, c2];
+            document.getElementById('opt-a').innerText = `${getFlagEmoji(c1.properties.iso_a2)} ${c1.properties.name}`;
+            document.getElementById('opt-b').innerText = `${getFlagEmoji(c2.properties.iso_a2)} ${c2.properties.name}`;
+        }
+
+        function guess(idx) {
+            // Re-calc simple area approximation for logic
+            const a1 = calculateArea(currentPair[0].geometry.type==="Polygon"? [currentPair[0].geometry.coordinates[0]] : [currentPair[0].geometry.coordinates[0][0]]);
+            const a2 = calculateArea(currentPair[1].geometry.type==="Polygon"? [currentPair[1].geometry.coordinates[0]] : [currentPair[1].geometry.coordinates[0][0]]);
+            
+            const isCorrect = (idx === 0 && a1 > a2) || (idx === 1 && a2 > a1);
+            const btn = idx===0 ? document.getElementById('opt-a') : document.getElementById('opt-b');
+            const other = idx===0 ? document.getElementById('opt-b') : document.getElementById('opt-a');
+
+            if(isCorrect) {
+                gameScore++;
+                document.getElementById('score-val').innerText = gameScore;
+                btn.classList.add('correct');
+                setTimeout(nextRound, 1000);
+            } else {
+                btn.classList.add('wrong');
+                other.classList.add('correct');
+                document.getElementById('btn-restart').style.display = 'inline-block';
+            }
+        }
+
+        // --- UI ---
+        function updateUI() {
+            const t = I18N[currentLang] || I18N.en;
+            document.getElementById('app-title').innerText = t.title;
+            document.getElementById('search-input').placeholder = t.search;
+            document.getElementById('btn-clear').innerText = t.clear;
+            if(currentLang === 'ar') { document.documentElement.dir = "rtl"; } else { document.documentElement.dir = "ltr"; }
+            document.querySelectorAll('[data-i18n]').forEach(el => { const k = el.getAttribute('data-i18n'); if(t[k]) el.innerText = t[k]; });
+            updateList();
+        }
+
+        window.changeLanguage = (l) => { currentLang = l; updateUI(); };
+        window.openModal = (id) => document.getElementById('modal-'+id).style.display = 'flex';
+        window.closeModals = () => document.querySelectorAll('.modal-overlay').forEach(el => el.style.display='none');
+        window.onload = init;
+
+    </script>
+</body>
+</html>
